@@ -15,6 +15,9 @@ const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
   secure: true,
+  connectionTimeout: 15000,
+  greetingTimeout: 10000,
+  socketTimeout: 20000,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -90,6 +93,12 @@ transporter.verify((error) => {
 
 app.post("/send-inventory", async (req, res) => {
   try {
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !process.env.EMAIL_TO) {
+      return res.status(500).json({
+        message: "Missing email env vars (EMAIL_USER, EMAIL_PASS, EMAIL_TO)",
+      });
+    }
+
     const { items } = req.body;
 
     if (!items || !Array.isArray(items)) {
@@ -170,12 +179,18 @@ app.post("/send-inventory", async (req, res) => {
       </div>
     `;
 
-    const info = await transporter.sendMail({
+    const sendMailPromise = transporter.sendMail({
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_TO,
       subject,
       html,
     });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("SMTP timeout after 25 seconds")), 25000);
+    });
+
+    const info = await Promise.race([sendMailPromise, timeoutPromise]);
 
     console.log("Accepted:", info.accepted);
     console.log("Rejected:", info.rejected);
