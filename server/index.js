@@ -7,7 +7,14 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-app.use(cors());
+const corsOptions = {
+  origin: true,
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
 
@@ -202,7 +209,7 @@ app.post("/send-inventory", async (req, res) => {
   } catch (error) {
     console.error("Email send error:", error);
     res.status(500).json({
-      message: "Failed to send inventory email",
+      message: `Failed to send inventory email: ${error.message}`,
       error: error.message,
       code: error.code || null,
     });

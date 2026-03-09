@@ -309,6 +309,7 @@ function App() {
 
       const response = await fetch(endpoint, {
         method: "POST",
+        mode: "cors",
         headers: {
           "Content-Type": "application/json"
         },
@@ -329,7 +330,9 @@ function App() {
         if (response.status === 404 && import.meta.env.PROD && !envBase) {
           throw new Error("Backend URL is missing. Set VITE_API_URL in Render frontend env.");
         }
-        throw new Error(data.message || "Failed to send inventory email");
+
+        const serverError = [data.message, data.error, data.code].filter(Boolean).join(" | ");
+        throw new Error(serverError || "Failed to send inventory email");
       }
 
       setMessage("Inventory email sent successfully.");
