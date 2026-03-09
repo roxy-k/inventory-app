@@ -288,8 +288,6 @@ function App() {
   };
 
   const sendInventory = async () => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
     const envBase = import.meta.env.VITE_API_URL
       ? String(import.meta.env.VITE_API_URL).replace(/\/$/, "")
       : "";
@@ -307,15 +305,21 @@ function App() {
         minimum: getMinimumValue(item.minimumText)
       }));
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        mode: "cors",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ items: normalizedItems }),
-        signal: controller.signal
-      });
+      const response = await Promise.race([
+        fetch(endpoint, {
+          method: "POST",
+          mode: "cors",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            Accept: "application/json"
+          },
+          body: JSON.stringify({ items: normalizedItems })
+        }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("CLIENT_TIMEOUT_90S")), 90000)
+        )
+      ]);
 
       const text = await response.text();
       let data = {};
@@ -337,7 +341,7 @@ function App() {
 
       setMessage("Inventory email sent successfully.");
     } catch (error) {
-      if (error.name === "AbortError") {
+      if (error.message === "CLIENT_TIMEOUT_90S") {
         setMessage("Request timed out after 90 seconds. Render backend may be sleeping.");
       } else if (error instanceof TypeError) {
         setMessage("Cannot connect to backend. Check VITE_API_URL and backend status on Render.");
@@ -345,7 +349,6 @@ function App() {
         setMessage(error.message || "Something went wrong.");
       }
     } finally {
-      clearTimeout(timeoutId);
       setIsSending(false);
     }
   };

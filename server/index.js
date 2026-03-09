@@ -1,11 +1,16 @@
 const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const dns = require("dns");
 require("dotenv").config();
 
 const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 5001;
+
+// Render instances may not have working outbound IPv6 routes to Gmail SMTP.
+// Force IPv4-first DNS resolution for SMTP connections.
+dns.setDefaultResultOrder("ipv4first");
 
 const corsOptions = {
   origin: true,
@@ -15,6 +20,15 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
 
@@ -22,6 +36,7 @@ const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 465,
   secure: true,
+  family: 4,
   connectionTimeout: 15000,
   greetingTimeout: 10000,
   socketTimeout: 20000,
