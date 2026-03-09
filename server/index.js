@@ -5,7 +5,7 @@ require("dotenv").config();
 
 const path = require("path");
 const app = express();
-const PORT = 5001;
+const PORT = process.env.PORT || 5001;
 
 app.use(cors());
 app.use(express.json());
@@ -193,10 +193,15 @@ app.post("/send-inventory", async (req, res) => {
     });
   }
 });
+
+app.get("/health", (req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.get("/{*splat}", (req, res) => {
   res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });

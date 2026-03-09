@@ -289,7 +289,7 @@ function App() {
 
   const sendInventory = async () => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
     const envBase = import.meta.env.VITE_API_URL
       ? String(import.meta.env.VITE_API_URL).replace(/\/$/, "")
       : "";
@@ -297,7 +297,7 @@ function App() {
 
     try {
       setIsSending(true);
-      setMessage("Sending email...");
+      setMessage("Sending email... (Render cold start can take up to 60-90 seconds)");
 
       const normalizedItems = items.map((item) => ({
         ...item,
@@ -326,15 +326,18 @@ function App() {
       }
 
       if (!response.ok) {
+        if (response.status === 404 && import.meta.env.PROD && !envBase) {
+          throw new Error("Backend URL is missing. Set VITE_API_URL in Render frontend env.");
+        }
         throw new Error(data.message || "Failed to send inventory email");
       }
 
       setMessage("Inventory email sent successfully.");
     } catch (error) {
       if (error.name === "AbortError") {
-        setMessage("Request took too long. Try again in 20–30 seconds.");
+        setMessage("Request timed out after 90 seconds. Render backend may be sleeping.");
       } else if (error instanceof TypeError) {
-        setMessage("Cannot connect to mail server. Check backend on port 5001.");
+        setMessage("Cannot connect to backend. Check VITE_API_URL and backend status on Render.");
       } else {
         setMessage(error.message || "Something went wrong.");
       }
