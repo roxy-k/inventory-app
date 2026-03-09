@@ -280,40 +280,49 @@ function App() {
     setMessage("Item deleted.");
   };
 
-  const sendInventory = async () => {
-    try {
-      setIsSending(true);
-      setMessage("");
+const sendInventory = async () => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
 
-      const normalizedItems = items.map((item) => ({
-        ...item,
-        name: item.name.trim(),
-        inStock: item.inStock === "" ? 0 : Number(item.inStock),
-        minimumText: item.minimumText.trim(),
-        minimum: getMinimumValue(item.minimumText)
-      }));
+  try {
+    setIsSending(true);
+    setMessage("Sending email...");
 
-      const response = await fetch("https://inventory-app-tefw.onrender.com/send-inventory", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ items: normalizedItems })
-      });
+    const normalizedItems = items.map((item) => ({
+      ...item,
+      name: String(item.name || "").trim(),
+      inStock: item.inStock === "" ? 0 : Number(item.inStock),
+      minimumText: String(item.minimumText || "").trim(),
+      minimum: getMinimumValue(item.minimumText),
+    }));
 
-      const data = await response.json();
+    const response = await fetch("/send-inventory", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ items: normalizedItems }),
+      signal: controller.signal,
+    });
 
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to send inventory email");
-      }
+    const data = await response.json();
 
-      setMessage("Inventory email sent successfully.");
-    } catch (error) {
-      setMessage(error.message || "Something went wrong.");
-    } finally {
-      setIsSending(false);
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to send inventory email");
     }
-  };
+
+    setMessage("Inventory email sent successfully.");
+  } catch (error) {
+    if (error.name === "AbortError") {
+      setMessage("Request took too long. Try again in 20–30 seconds.");
+    } else {
+      setMessage(error.message || "Something went wrong.");
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    setIsSending(false);
+  }
+};
 
   const groupedHistory = useMemo(() => {
     const groups = {};
@@ -476,7 +485,7 @@ function App() {
             placeholder="In stock"
             value={newStock}
             onChange={(e) => setNewStock(e.target.value)}
-            style={{ ...inputStyle, width: "120px" }}
+            style={{ ...inputStyle, minWidth: "140px",width: "100%" }}
           />
 
           <input
@@ -484,7 +493,7 @@ function App() {
             placeholder='Minimum (example: 3 or 1 pack (12))'
             value={newMinimumText}
             onChange={(e) => setNewMinimumText(e.target.value)}
-            style={{ ...inputStyle, minWidth: "220px" }}
+            style={{ ...inputStyle, minWidth: "220px",width: "100%" }}
           />
 
           <button onClick={addItem} style={buttonStyle}>
@@ -598,7 +607,8 @@ const cardStyle = {
 
 const tableStyle = {
   borderCollapse: "collapse",
-  width: "100%"
+  width: "100%",
+  minWidth: "760px"
 };
 
 const tableHeadRowStyle = {
