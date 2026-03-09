@@ -293,7 +293,7 @@ function App() {
         minimum: getMinimumValue(item.minimumText)
       }));
 
-      const response = await fetch("http://localhost:5001/send-inventory", {
+      const response = await fetch("https://inventory-app-tefw.onrender.com/send-inventory", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
