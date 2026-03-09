@@ -50,6 +50,7 @@ function getMinimumValue(minimumText) {
 }
 
 function App() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
   const [items, setItems] = useState(() => {
     const savedItems = localStorage.getItem("inventoryItems");
     return savedItems ? JSON.parse(savedItems) : defaultItems;
@@ -86,6 +87,12 @@ function App() {
   useEffect(() => {
     localStorage.setItem("inventoryHistory", JSON.stringify(history));
   }, [history]);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const createHistoryRecord = (itemName, previousValue, newValue, customText = null) => {
     const now = new Date();
@@ -280,49 +287,60 @@ function App() {
     setMessage("Item deleted.");
   };
 
-const sendInventory = async () => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 20000);
+  const sendInventory = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const envBase = import.meta.env.VITE_API_URL
+      ? String(import.meta.env.VITE_API_URL).replace(/\/$/, "")
+      : "";
+    const apiBase = envBase || (import.meta.env.DEV ? "http://localhost:5001" : window.location.origin);
 
-  try {
-    setIsSending(true);
-    setMessage("Sending email...");
+    try {
+      setIsSending(true);
+      setMessage("Sending email...");
 
-    const normalizedItems = items.map((item) => ({
-      ...item,
-      name: String(item.name || "").trim(),
-      inStock: item.inStock === "" ? 0 : Number(item.inStock),
-      minimumText: String(item.minimumText || "").trim(),
-      minimum: getMinimumValue(item.minimumText),
-    }));
+      const normalizedItems = items.map((item) => ({
+        ...item,
+        name: String(item.name || "").trim(),
+        inStock: item.inStock === "" ? 0 : Number(item.inStock),
+        minimumText: String(item.minimumText || "").trim(),
+        minimum: getMinimumValue(item.minimumText)
+      }));
 
-    const response = await fetch("/send-inventory", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ items: normalizedItems }),
-      signal: controller.signal,
-    });
+      const response = await fetch(`${apiBase}/send-inventory`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ items: normalizedItems }),
+        signal: controller.signal
+      });
 
-    const data = await response.json();
+      const text = await response.text();
+      let data = {};
 
-    if (!response.ok) {
-      throw new Error(data.message || "Failed to send inventory email");
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { message: text };
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || "Failed to send inventory email");
+      }
+
+      setMessage("Inventory email sent successfully.");
+    } catch (error) {
+      if (error.name === "AbortError") {
+        setMessage("Request took too long. Try again in 20–30 seconds.");
+      } else {
+        setMessage(error.message || "Something went wrong.");
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setIsSending(false);
     }
-
-    setMessage("Inventory email sent successfully.");
-  } catch (error) {
-    if (error.name === "AbortError") {
-      setMessage("Request took too long. Try again in 20–30 seconds.");
-    } else {
-      setMessage(error.message || "Something went wrong.");
-    }
-  } finally {
-    clearTimeout(timeoutId);
-    setIsSending(false);
-  }
-};
+  };
 
   const groupedHistory = useMemo(() => {
     const groups = {};
@@ -345,89 +363,153 @@ const sendInventory = async () => {
       return Number(item.inStock || 0) < getMinimumValue(item.minimumText);
     });
 
+    const renderMobileCards = () => (
+      <div style={{ display: "grid", gap: "12px" }}>
+        {visibleItems.map((item) => {
+          const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
+
+          return (
+            <div key={item.id} style={{ ...mobileItemCardStyle, borderColor: low ? "#fecaca" : "#e2e8f0" }}>
+              <div style={mobileItemHeaderStyle}>
+                <strong style={{ color: "#0f172a" }}>{item.name}</strong>
+                <span
+                  style={{
+                    ...statusStyle,
+                    color: low ? "#b91c1c" : "#166534",
+                    backgroundColor: low ? "#fee2e2" : "#dcfce7"
+                  }}
+                >
+                  {low ? "⚠️ Low" : "OK"}
+                </span>
+              </div>
+
+              <label style={mobileLabelStyle}>
+                Item
+                <input
+                  type="text"
+                  value={item.name}
+                  onChange={(e) => updateItemField(item.id, "name", e.target.value)}
+                  style={{ ...inputStyle, width: "100%" }}
+                />
+              </label>
+
+              <label style={mobileLabelStyle}>
+                In Stock
+                <input
+                  type="number"
+                  min="0"
+                  value={item.inStock}
+                  onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
+                  style={{ ...inputStyle, width: "100%" }}
+                />
+              </label>
+
+              <label style={mobileLabelStyle}>
+                Minimum
+                <input
+                  type="text"
+                  value={item.minimumText}
+                  onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
+                  style={{ ...inputStyle, width: "100%" }}
+                />
+              </label>
+
+              <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
+                Delete
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+
     return (
       <div style={{ marginBottom: "28px" }}>
         <h2 style={sectionTitleStyle}>{title}</h2>
 
         <div style={cardStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr style={tableHeadRowStyle}>
-                <th style={thStyle}>Item</th>
-                <th style={thStyle}>In Stock</th>
-                <th style={thStyle}>Minimum</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Action</th>
-              </tr>
-            </thead>
+          {isMobile ? (
+            renderMobileCards()
+          ) : (
+            <table style={tableStyle}>
+              <thead>
+                <tr style={tableHeadRowStyle}>
+                  <th style={thStyle}>Item</th>
+                  <th style={thStyle}>In Stock</th>
+                  <th style={thStyle}>Minimum</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Action</th>
+                </tr>
+              </thead>
 
-            <tbody>
-              {visibleItems.map((item) => {
-                const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
+              <tbody>
+                {visibleItems.map((item) => {
+                  const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
 
-                return (
-                  <tr key={item.id} style={{ backgroundColor: low ? "#fff1f2" : "#ffffff" }}>
-                    <td style={tdStyle}>
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => updateItemField(item.id, "name", e.target.value)}
-                        style={{ ...inputStyle, width: "100%" }}
-                      />
-                    </td>
+                  return (
+                    <tr key={item.id} style={{ backgroundColor: low ? "#fff1f2" : "#ffffff" }}>
+                      <td style={tdStyle}>
+                        <input
+                          type="text"
+                          value={item.name}
+                          onChange={(e) => updateItemField(item.id, "name", e.target.value)}
+                          style={{ ...inputStyle, width: "100%" }}
+                        />
+                      </td>
 
-                    <td style={tdStyle}>
-                      <input
-                        type="number"
-                        min="0"
-                        value={item.inStock}
-                        onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
-                        style={{ ...inputStyle, width: "90px" }}
-                      />
-                    </td>
+                      <td style={tdStyle}>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.inStock}
+                          onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
+                          style={{ ...inputStyle, width: "90px" }}
+                        />
+                      </td>
 
-                    <td style={tdStyle}>
-                      <input
-                        type="text"
-                        value={item.minimumText}
-                        onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
-                        style={{ ...inputStyle, width: "140px" }}
-                      />
-                    </td>
+                      <td style={tdStyle}>
+                        <input
+                          type="text"
+                          value={item.minimumText}
+                          onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
+                          style={{ ...inputStyle, width: "140px" }}
+                        />
+                      </td>
 
-                    <td style={tdStyle}>
-                      <span
-                        style={{
-                          ...statusStyle,
-                          color: low ? "#b91c1c" : "#166534",
-                          backgroundColor: low ? "#fee2e2" : "#dcfce7"
-                        }}
-                      >
-                        {low ? "⚠️ Low" : "OK"}
-                      </span>
-                    </td>
+                      <td style={tdStyle}>
+                        <span
+                          style={{
+                            ...statusStyle,
+                            color: low ? "#b91c1c" : "#166534",
+                            backgroundColor: low ? "#fee2e2" : "#dcfce7"
+                          }}
+                        >
+                          {low ? "⚠️ Low" : "OK"}
+                        </span>
+                      </td>
 
-                    <td style={tdStyle}>
-                      <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      <td style={tdStyle}>
+                        <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     );
   };
 
   return (
-    <div style={pageStyle}>
-      <div style={headerStyle}>
+    <div style={{ ...pageStyle, padding: isMobile ? "14px" : "32px" }}>
+      <div style={{ ...headerStyle, alignItems: isMobile ? "flex-start" : "center" }}>
         <img src="/logo.png" alt="logo" style={logoStyle} />
         <div>
-          <h1 style={titleStyle}>Inventory</h1>
+          <h1 style={{ ...titleStyle, fontSize: isMobile ? "28px" : "32px" }}>Inventory</h1>
           <p style={subtitleStyle}>Supply Checklist + Ink Inventory</p>
         </div>
       </div>
@@ -673,6 +755,28 @@ const addFormStyle = {
   gap: "12px",
   flexWrap: "wrap",
   alignItems: "center"
+};
+
+const mobileItemCardStyle = {
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "12px",
+  backgroundColor: "#ffffff"
+};
+
+const mobileItemHeaderStyle = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  marginBottom: "10px"
+};
+
+const mobileLabelStyle = {
+  display: "block",
+  fontSize: "13px",
+  color: "#475569",
+  marginBottom: "10px"
 };
 
 const sectionTitleStyle = {
