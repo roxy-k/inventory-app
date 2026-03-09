@@ -293,7 +293,7 @@ function App() {
     const envBase = import.meta.env.VITE_API_URL
       ? String(import.meta.env.VITE_API_URL).replace(/\/$/, "")
       : "";
-    const apiBase = envBase || (import.meta.env.DEV ? "http://localhost:5001" : window.location.origin);
+    const endpoint = `${envBase}/send-inventory`.replace(/^\/send-inventory$/, "/send-inventory");
 
     try {
       setIsSending(true);
@@ -307,7 +307,7 @@ function App() {
         minimum: getMinimumValue(item.minimumText)
       }));
 
-      const response = await fetch(`${apiBase}/send-inventory`, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -333,6 +333,8 @@ function App() {
     } catch (error) {
       if (error.name === "AbortError") {
         setMessage("Request took too long. Try again in 20–30 seconds.");
+      } else if (error instanceof TypeError) {
+        setMessage("Cannot connect to mail server. Check backend on port 5001.");
       } else {
         setMessage(error.message || "Something went wrong.");
       }
@@ -363,142 +365,88 @@ function App() {
       return Number(item.inStock || 0) < getMinimumValue(item.minimumText);
     });
 
-    const renderMobileCards = () => (
-      <div style={{ display: "grid", gap: "12px" }}>
-        {visibleItems.map((item) => {
-          const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
-
-          return (
-            <div key={item.id} style={{ ...mobileItemCardStyle, borderColor: low ? "#fecaca" : "#e2e8f0" }}>
-              <div style={mobileItemHeaderStyle}>
-                <strong style={{ color: "#0f172a" }}>{item.name}</strong>
-                <span
-                  style={{
-                    ...statusStyle,
-                    color: low ? "#b91c1c" : "#166534",
-                    backgroundColor: low ? "#fee2e2" : "#dcfce7"
-                  }}
-                >
-                  {low ? "⚠️ Low" : "OK"}
-                </span>
-              </div>
-
-              <label style={mobileLabelStyle}>
-                Item
-                <input
-                  type="text"
-                  value={item.name}
-                  onChange={(e) => updateItemField(item.id, "name", e.target.value)}
-                  style={{ ...inputStyle, width: "100%" }}
-                />
-              </label>
-
-              <label style={mobileLabelStyle}>
-                In Stock
-                <input
-                  type="number"
-                  min="0"
-                  value={item.inStock}
-                  onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
-                  style={{ ...inputStyle, width: "100%" }}
-                />
-              </label>
-
-              <label style={mobileLabelStyle}>
-                Minimum
-                <input
-                  type="text"
-                  value={item.minimumText}
-                  onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
-                  style={{ ...inputStyle, width: "100%" }}
-                />
-              </label>
-
-              <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
-                Delete
-              </button>
-            </div>
-          );
-        })}
-      </div>
-    );
-
     return (
       <div style={{ marginBottom: "28px" }}>
         <h2 style={sectionTitleStyle}>{title}</h2>
 
         <div style={cardStyle}>
-          {isMobile ? (
-            renderMobileCards()
-          ) : (
-            <table style={tableStyle}>
-              <thead>
-                <tr style={tableHeadRowStyle}>
-                  <th style={thStyle}>Item</th>
-                  <th style={thStyle}>In Stock</th>
-                  <th style={thStyle}>Minimum</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Action</th>
-                </tr>
-              </thead>
+          <table style={{ ...tableStyle, minWidth: isMobile ? "640px" : "760px" }}>
+            <thead>
+              <tr style={tableHeadRowStyle}>
+                <th style={{ ...thStyle, fontSize: isMobile ? "13px" : "14px", padding: isMobile ? "10px 8px" : "12px" }}>
+                  Item
+                </th>
+                <th style={{ ...thStyle, fontSize: isMobile ? "13px" : "14px", padding: isMobile ? "10px 8px" : "12px" }}>
+                  In Stock
+                </th>
+                <th style={{ ...thStyle, fontSize: isMobile ? "13px" : "14px", padding: isMobile ? "10px 8px" : "12px" }}>
+                  Minimum
+                </th>
+                <th style={{ ...thStyle, fontSize: isMobile ? "13px" : "14px", padding: isMobile ? "10px 8px" : "12px" }}>
+                  Status
+                </th>
+                <th style={{ ...thStyle, fontSize: isMobile ? "13px" : "14px", padding: isMobile ? "10px 8px" : "12px" }}>
+                  Action
+                </th>
+              </tr>
+            </thead>
 
-              <tbody>
-                {visibleItems.map((item) => {
-                  const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
+            <tbody>
+              {visibleItems.map((item) => {
+                const low = Number(item.inStock || 0) < getMinimumValue(item.minimumText);
 
-                  return (
-                    <tr key={item.id} style={{ backgroundColor: low ? "#fff1f2" : "#ffffff" }}>
-                      <td style={tdStyle}>
-                        <input
-                          type="text"
-                          value={item.name}
-                          onChange={(e) => updateItemField(item.id, "name", e.target.value)}
-                          style={{ ...inputStyle, width: "100%" }}
-                        />
-                      </td>
+                return (
+                  <tr key={item.id} style={{ backgroundColor: low ? "#fff1f2" : "#ffffff" }}>
+                    <td style={{ ...tdStyle, padding: isMobile ? "10px 8px" : "12px" }}>
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateItemField(item.id, "name", e.target.value)}
+                        style={{ ...inputStyle, width: "100%" }}
+                      />
+                    </td>
 
-                      <td style={tdStyle}>
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.inStock}
-                          onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
-                          style={{ ...inputStyle, width: "90px" }}
-                        />
-                      </td>
+                    <td style={{ ...tdStyle, padding: isMobile ? "10px 8px" : "12px" }}>
+                      <input
+                        type="number"
+                        min="0"
+                        value={item.inStock}
+                        onChange={(e) => updateItemField(item.id, "inStock", e.target.value)}
+                        style={{ ...inputStyle, width: isMobile ? "72px" : "90px" }}
+                      />
+                    </td>
 
-                      <td style={tdStyle}>
-                        <input
-                          type="text"
-                          value={item.minimumText}
-                          onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
-                          style={{ ...inputStyle, width: "140px" }}
-                        />
-                      </td>
+                    <td style={{ ...tdStyle, padding: isMobile ? "10px 8px" : "12px" }}>
+                      <input
+                        type="text"
+                        value={item.minimumText}
+                        onChange={(e) => updateItemField(item.id, "minimumText", e.target.value)}
+                        style={{ ...inputStyle, width: isMobile ? "120px" : "140px" }}
+                      />
+                    </td>
 
-                      <td style={tdStyle}>
-                        <span
-                          style={{
-                            ...statusStyle,
-                            color: low ? "#b91c1c" : "#166534",
-                            backgroundColor: low ? "#fee2e2" : "#dcfce7"
-                          }}
-                        >
-                          {low ? "⚠️ Low" : "OK"}
-                        </span>
-                      </td>
+                    <td style={{ ...tdStyle, padding: isMobile ? "10px 8px" : "12px" }}>
+                      <span
+                        style={{
+                          ...statusStyle,
+                          color: low ? "#b91c1c" : "#166534",
+                          backgroundColor: low ? "#fee2e2" : "#dcfce7"
+                        }}
+                      >
+                        {low ? "⚠️ Low" : "OK"}
+                      </span>
+                    </td>
 
-                      <td style={tdStyle}>
-                        <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+                    <td style={{ ...tdStyle, padding: isMobile ? "10px 8px" : "12px" }}>
+                      <button onClick={() => deleteItem(item.id)} style={deleteButtonStyle}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     );
@@ -755,28 +703,6 @@ const addFormStyle = {
   gap: "12px",
   flexWrap: "wrap",
   alignItems: "center"
-};
-
-const mobileItemCardStyle = {
-  border: "1px solid #e2e8f0",
-  borderRadius: "12px",
-  padding: "12px",
-  backgroundColor: "#ffffff"
-};
-
-const mobileItemHeaderStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "12px",
-  marginBottom: "10px"
-};
-
-const mobileLabelStyle = {
-  display: "block",
-  fontSize: "13px",
-  color: "#475569",
-  marginBottom: "10px"
 };
 
 const sectionTitleStyle = {
