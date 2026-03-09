@@ -3,11 +3,13 @@ const cors = require("cors");
 const nodemailer = require("nodemailer");
 require("dotenv").config();
 
+const path = require("path");
 const app = express();
 const PORT = 5001;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "../dist")));
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
@@ -190,6 +192,9 @@ app.post("/send-inventory", async (req, res) => {
       code: error.code || null,
     });
   }
+});
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "../dist/index.html"));
 });
 
 app.listen(PORT, () => {
