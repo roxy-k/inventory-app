@@ -8,8 +8,6 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// Render instances may not have working outbound IPv6 routes to Gmail SMTP.
-// Force IPv4-first DNS resolution for SMTP connections.
 dns.setDefaultResultOrder("ipv4first");
 
 const corsOptions = {
@@ -34,9 +32,12 @@ app.use(express.static(path.join(__dirname, "../dist")));
 
 const transporter = nodemailer.createTransport({
   host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  port: 587,          
+  secure: false,      
   family: 4,
+  tls: {
+    rejectUnauthorized: false
+  },
   connectionTimeout: 15000,
   greetingTimeout: 10000,
   socketTimeout: 20000,
