@@ -28,10 +28,14 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
 
 async function getAccessToken() {
+  const clientId = String(process.env.GMAIL_CLIENT_ID || "").trim();
+  const clientSecret = String(process.env.GMAIL_CLIENT_SECRET || "").trim();
+  const refreshToken = String(process.env.GMAIL_REFRESH_TOKEN || "").trim();
+
   const params = new URLSearchParams({
-    client_id: process.env.GMAIL_CLIENT_ID,
-    client_secret: process.env.GMAIL_CLIENT_SECRET,
-    refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
     grant_type: "refresh_token",
   });
 
@@ -60,7 +64,11 @@ async function getAccessToken() {
 
           const details =
             parsed.error_description || parsed.error || JSON.stringify(parsed);
-          reject(new Error(`Gmail token error ${res.statusCode}: ${details}`));
+          const hint =
+            res.statusCode === 401
+              ? " Check client_id/client_secret/refresh_token pair and regenerate refresh token for this exact OAuth client."
+              : "";
+          reject(new Error(`Gmail token error ${res.statusCode}: ${details}.${hint}`));
         } catch {
           reject(new Error(`Gmail token parse error: ${data}`));
         }
