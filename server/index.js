@@ -27,8 +27,6 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
 
-// ─── Gmail API helpers ────────────────────────────────────────────────────────
-
 async function getAccessToken() {
   const params = new URLSearchParams({
     client_id: process.env.GMAIL_CLIENT_ID,
@@ -54,14 +52,17 @@ async function getAccessToken() {
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
         try {
-          const parsed = JSON.parse(data);
-          if (parsed.access_token) {
+          const parsed = data ? JSON.parse(data) : {};
+          if (res.statusCode >= 200 && res.statusCode < 300 && parsed.access_token) {
             resolve(parsed.access_token);
-          } else {
-            reject(new Error(`Token error: ${JSON.stringify(parsed)}`));
+            return;
           }
-        } catch (e) {
-          reject(e);
+
+          const details =
+            parsed.error_description || parsed.error || JSON.stringify(parsed);
+          reject(new Error(`Gmail token error ${res.statusCode}: ${details}`));
+        } catch {
+          reject(new Error(`Gmail token parse error: ${data}`));
         }
       });
     });
@@ -72,9 +73,7 @@ async function getAccessToken() {
   });
 }
 
-async function sendGmailMessage(accessToken, to, subject, htmlBody) {
-  const from = process.env.EMAIL_USER;
-
+async function sendGmailMessage({ accessToken, from, to, subject, htmlBody }) {
   const messageParts = [
     `From: ${from}`,
     `To: ${to}`,
@@ -110,10 +109,28 @@ async function sendGmailMessage(accessToken, to, subject, htmlBody) {
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve(JSON.parse(data));
-        } else {
-          reject(new Error(`Gmail API error ${res.statusCode}: ${data}`));
+          resolve(data ? JSON.parse(data) : {});
+          return;
         }
+
+        let parsed = null;
+        try {
+          parsed = data ? JSON.parse(data) : null;
+        } catch {
+          parsed = null;
+        }
+
+        const details =
+          parsed?.error?.message ||
+          parsed?.error_description ||
+          parsed?.error ||
+          data;
+        const error = new Error(
+          `Gmail API error ${res.statusCode}: ${details || "Unknown error"}`
+        );
+        error.statusCode = res.statusCode;
+        error.responseBody = data;
+        reject(error);
       });
     });
 
@@ -122,8 +139,6 @@ async function sendGmailMessage(accessToken, to, subject, htmlBody) {
     req.end();
   });
 }
-
-// ─── Email content builders ───────────────────────────────────────────────────
 
 const getMinimumValue = (minimumText) => {
   const match = String(minimumText || "").match(/\d+/);
@@ -184,20 +199,21 @@ const buildSectionTable = (title, items) => {
   `;
 };
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
-
 app.post("/send-inventory", async (req, res) => {
   try {
+    const from = process.env.EMAIL_FROM || process.env.EMAIL_USER;
+    const to = process.env.EMAIL_TO;
+
     if (
       !process.env.GMAIL_CLIENT_ID ||
       !process.env.GMAIL_CLIENT_SECRET ||
       !process.env.GMAIL_REFRESH_TOKEN ||
-      !process.env.EMAIL_USER ||
-      !process.env.EMAIL_TO
+      !from ||
+      !to
     ) {
       return res.status(500).json({
         message:
-          "Missing env vars. Required: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, EMAIL_USER, EMAIL_TO",
+          "Missing env vars. Required: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, EMAIL_FROM (or EMAIL_USER), EMAIL_TO",
       });
     }
 
@@ -275,15 +291,33 @@ app.post("/send-inventory", async (req, res) => {
     `;
 
     const accessToken = await getAccessToken();
-    await sendGmailMessage(accessToken, process.env.EMAIL_TO, subject, html);
+    await sendGmailMessage({
+      accessToken,
+      from,
+      to,
+      subject,
+      htmlBody: html,
+    });
 
     console.log("Email sent successfully via Gmail API");
     res.status(200).json({ message: "Inventory email sent successfully" });
   } catch (error) {
-    console.error("Email send error:", error);
-    res.status(500).json({
+    console.error("Email send error:", error.message, error.responseBody || "");
+    const code = Number(error.statusCode);
+
+    res.status(code >= 400 && code < 600 ? code : 500).json({
       message: `Failed to send inventory email: ${error.message}`,
       error: error.message,
+      statusCode: error.statusCode || 500,
+      provider: "gmail",
+      details:
+        code === 401
+          ? "Invalid Gmail credentials or refresh token"
+          : code === 403
+            ? "OAuth app/test user/scope access denied in Google Cloud"
+            : code === 422
+              ? "Invalid email payload (check EMAIL_FROM/EMAIL_TO format)"
+              : undefined,
     });
   }
 });
