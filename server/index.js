@@ -1,14 +1,11 @@
 const express = require("express");
 const cors = require("cors");
-const nodemailer = require("nodemailer");
-const dns = require("dns");
+const https = require("https");
 require("dotenv").config();
 
 const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 5001;
-
-dns.setDefaultResultOrder("ipv4first");
 
 const corsOptions = {
   origin: true,
@@ -30,22 +27,103 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "../dist")));
 
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,          
-  secure: false,      
-  family: 4,
-  tls: {
-    rejectUnauthorized: false
-  },
-  connectionTimeout: 15000,
-  greetingTimeout: 10000,
-  socketTimeout: 20000,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+// ─── Gmail API helpers ────────────────────────────────────────────────────────
+
+async function getAccessToken() {
+  const params = new URLSearchParams({
+    client_id: process.env.GMAIL_CLIENT_ID,
+    client_secret: process.env.GMAIL_CLIENT_SECRET,
+    refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+    grant_type: "refresh_token",
+  });
+
+  return new Promise((resolve, reject) => {
+    const body = params.toString();
+    const options = {
+      hostname: "oauth2.googleapis.com",
+      path: "/token",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.access_token) {
+            resolve(parsed.access_token);
+          } else {
+            reject(new Error(`Token error: ${JSON.stringify(parsed)}`));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+async function sendGmailMessage(accessToken, to, subject, htmlBody) {
+  const from = process.env.EMAIL_USER;
+
+  const messageParts = [
+    `From: ${from}`,
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    htmlBody,
+  ];
+
+  const raw = Buffer.from(messageParts.join("\r\n"))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+
+  const body = JSON.stringify({ raw });
+
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: "gmail.googleapis.com",
+      path: "/gmail/v1/users/me/messages/send",
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (chunk) => (data += chunk));
+      res.on("end", () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(JSON.parse(data));
+        } else {
+          reject(new Error(`Gmail API error ${res.statusCode}: ${data}`));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// ─── Email content builders ───────────────────────────────────────────────────
 
 const getMinimumValue = (minimumText) => {
   const match = String(minimumText || "").match(/\d+/);
@@ -106,19 +184,20 @@ const buildSectionTable = (title, items) => {
   `;
 };
 
-transporter.verify((error) => {
-  if (error) {
-    console.error("SMTP verify error:", error);
-  } else {
-    console.log("SMTP is ready to send emails");
-  }
-});
+// ─── Routes ───────────────────────────────────────────────────────────────────
 
 app.post("/send-inventory", async (req, res) => {
   try {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !process.env.EMAIL_TO) {
+    if (
+      !process.env.GMAIL_CLIENT_ID ||
+      !process.env.GMAIL_CLIENT_SECRET ||
+      !process.env.GMAIL_REFRESH_TOKEN ||
+      !process.env.EMAIL_USER ||
+      !process.env.EMAIL_TO
+    ) {
       return res.status(500).json({
-        message: "Missing email env vars (EMAIL_USER, EMAIL_PASS, EMAIL_TO)",
+        message:
+          "Missing env vars. Required: GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, EMAIL_USER, EMAIL_TO",
       });
     }
 
@@ -144,30 +223,25 @@ app.post("/send-inventory", async (req, res) => {
         item.minimumText !== undefined && item.minimumText !== null
           ? item.minimumText
           : String(item.minimum ?? "");
-
-      const minimumValue = getMinimumValue(minimumLabel);
-      return Number(item.inStock || 0) < minimumValue;
+      return Number(item.inStock || 0) < getMinimumValue(minimumLabel);
     });
 
-    const lowStockRows = lowStockItems.length
-      ? lowStockItems
-          .map((item) => {
-            const minimumLabel =
-              item.minimumText !== undefined && item.minimumText !== null
-                ? item.minimumText
-                : String(item.minimum ?? "");
-
-            return `
-              <tr>
-                <td style="border:1px solid #cccccc; padding:10px;">${item.category}</td>
-                <td style="border:1px solid #cccccc; padding:10px;">${item.name}</td>
-                <td style="border:1px solid #cccccc; padding:10px; text-align:center;">${Number(item.inStock || 0)}</td>
-                <td style="border:1px solid #cccccc; padding:10px; text-align:center;">${minimumLabel}</td>
-              </tr>
-            `;
-          })
-          .join("")
-      : "";
+    const lowStockRows = lowStockItems
+      .map((item) => {
+        const minimumLabel =
+          item.minimumText !== undefined && item.minimumText !== null
+            ? item.minimumText
+            : String(item.minimum ?? "");
+        return `
+          <tr>
+            <td style="border:1px solid #cccccc; padding:10px;">${item.category}</td>
+            <td style="border:1px solid #cccccc; padding:10px;">${item.name}</td>
+            <td style="border:1px solid #cccccc; padding:10px; text-align:center;">${Number(item.inStock || 0)}</td>
+            <td style="border:1px solid #cccccc; padding:10px; text-align:center;">${minimumLabel}</td>
+          </tr>
+        `;
+      })
+      .join("");
 
     const html = `
       <div style="font-family:Arial, sans-serif; color:#222; padding:20px;">
@@ -191,9 +265,7 @@ app.post("/send-inventory", async (req, res) => {
                       <th style="border:1px solid #cccccc; padding:10px; text-align:center;">Minimum</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    ${lowStockRows}
-                  </tbody>
+                  <tbody>${lowStockRows}</tbody>
                 </table>
               `
               : `<p>No low stock items.</p>`
@@ -202,32 +274,16 @@ app.post("/send-inventory", async (req, res) => {
       </div>
     `;
 
-    const sendMailPromise = transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_TO,
-      subject,
-      html,
-    });
+    const accessToken = await getAccessToken();
+    await sendGmailMessage(accessToken, process.env.EMAIL_TO, subject, html);
 
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("SMTP timeout after 25 seconds")), 25000);
-    });
-
-    const info = await Promise.race([sendMailPromise, timeoutPromise]);
-
-    console.log("Accepted:", info.accepted);
-    console.log("Rejected:", info.rejected);
-    console.log("Response:", info.response);
-
-    res.status(200).json({
-      message: "Inventory email sent successfully",
-    });
+    console.log("Email sent successfully via Gmail API");
+    res.status(200).json({ message: "Inventory email sent successfully" });
   } catch (error) {
     console.error("Email send error:", error);
     res.status(500).json({
       message: `Failed to send inventory email: ${error.message}`,
       error: error.message,
-      code: error.code || null,
     });
   }
 });
